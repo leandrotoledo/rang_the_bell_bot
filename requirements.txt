@@ -1,0 +1,4 @@
+paho-mqtt
+emoji
+python-dotenv
+python-telegram-bot
