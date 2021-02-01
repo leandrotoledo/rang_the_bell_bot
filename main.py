@@ -39,7 +39,7 @@ class TelegramBot(object):
             self.cursor.execute(DB_INIT_SQL)
             logger.info('[SQLite] Connected to the database')
         except Error as e:
-            logger.critical('[SQLite] Error: %s' % e)
+            logger.critical('[SQLite] {}'.format(e))
         finally:
             if self.db:
                 self.db.commit()
@@ -56,8 +56,8 @@ class TelegramBot(object):
 
         sql = """
             SELECT handled_by, created_on 
-            FROM logs WHERE handled_by IS NOT NULL AND created_on > date('now') ORDER BY id DESC LIMIT 1;"""
-        self.cursor.execute(sql)
+            FROM logs WHERE handled_by IS NOT NULL AND created_on > ? ORDER BY id DESC LIMIT 1;"""
+        self.cursor.execute(sql, (datetime.date.today(),))
         data = self.cursor.fetchone()
 
         sql = """INSERT INTO logs ('event', 'trigger', 'state', 'created_on') VALUES (?, ?, ?, ?);"""
@@ -135,7 +135,7 @@ class TelegramBot(object):
         for job in current_jobs:
             job.schedule_removal()
 
-        context.job_queue.run_once(self.send_survey, getenv('TELEGRAM_SURVEY_DELAY'),
+        context.job_queue.run_once(self.send_survey, int(getenv('TELEGRAM_SURVEY_DELAY')),
                                    context={'user': user, 'user_id': user_id, 'message_id': message_id},
                                    name=str(message_id))
 
@@ -210,36 +210,37 @@ class TelegramBot(object):
         logger.info('[Telegram] report requested by %s' % user)
 
         text = ''
+        today = datetime.date.today()
 
         # Number of time(s) she's been taken out
         sql = """
             SELECT COUNT(event) FROM logs 
-            WHERE created_on > date('now') AND state = ?"""
-        self.cursor.execute(sql, (STATE.COMPLETED,))
+            WHERE created_on > ? AND state = ?"""
+        self.cursor.execute(sql, (today, STATE.COMPLETED,))
         taken_out_count = self.cursor.fetchone()
-        if taken_out_count and taken_out_count[0] > 0:
-            text += emojize('\n\n*How many time(s) was she taken out today?*\n', use_aliases=True)
-            text += '   She was taken out *{} time(s)*'.format(*taken_out_count)
+        if taken_out_count and int(taken_out_count[0]) > 0:
+            text += emojize('\n\n*How many time\(s\) was she taken out today?*\n', use_aliases=True)
+            text += '   She was taken out *{} time\(s\)*:'.format(*taken_out_count)
 
         # Breakdown - Trigger: Bell Rang vs Manual
         sql = """
             SELECT COUNT(event), trigger FROM logs 
-            WHERE created_on > date('now') AND state = ? GROUP BY trigger ORDER BY 2 DESC"""
-        self.cursor.execute(sql, (STATE.COMPLETED,))
+            WHERE created_on > ? AND state = ? GROUP BY trigger ORDER BY 2 DESC"""
+        self.cursor.execute(sql, (today, STATE.COMPLETED,))
         rows = self.cursor.fetchall()
         if rows:
             for row in rows:
                 text += '\n'
                 if row[1] == TRIGGER.TARLY:
-                    text += '       \- _She rang the bell *%d time(s)*_' % row[0]
+                    text += '       \- _%d time\(s\) ringing the bell_' % row[0]
                 elif row[1] == TRIGGER.MANUAL:
-                    text += '       \- _She was taken out *%d time(s)* without ringing the bell_' % row[0]
+                    text += '       \- _%d time\(s\) without ringing the bell_' % row[0]
 
         # Number of time(s) bell was dismissed.
         sql = """
             SELECT COUNT(event) FROM logs 
-            WHERE created_on > date('now') AND state = ? GROUP BY state"""
-        self.cursor.execute(sql, (STATE.DISMISSED,))
+            WHERE created_on > ? AND state = ? GROUP BY state"""
+        self.cursor.execute(sql, (today, STATE.DISMISSED,))
         dismissed_count = self.cursor.fetchone()
         if dismissed_count:
             text += '\n'
@@ -248,19 +249,19 @@ class TelegramBot(object):
         # Breakdown - Trigger: Handled By
         sql = """
             SELECT handled_by, COUNT(event) FROM logs 
-            WHERE created_on > date('now') AND state = ? GROUP BY handled_by ORDER BY 2 DESC"""
-        self.cursor.execute(sql, (STATE.COMPLETED,))
+            WHERE created_on > ? AND state = ? GROUP BY handled_by ORDER BY 2 DESC"""
+        self.cursor.execute(sql, (today, STATE.COMPLETED,))
         rows = self.cursor.fetchall()
         if rows:
             text += emojize('\n\n*Who\'s taken her out today?*', use_aliases=True)
             for row in rows:
-                text += '\n   *{}* took her out {} time(s)'.format(*row)
+                text += '\n   *{}* took her out *{} time\(s\)*'.format(*row)
 
         # Last time she's been taken out
         sql = """
             SELECT handled_by, result, created_on FROM logs 
-            WHERE created_on > date('now') AND state = ? ORDER BY id DESC LIMIT 1"""
-        self.cursor.execute(sql, (STATE.COMPLETED,))
+            WHERE created_on > ? AND state = ? ORDER BY id DESC LIMIT 1"""
+        self.cursor.execute(sql, (today, STATE.COMPLETED,))
         last_taken_out = self.cursor.fetchone()
         last_taken_out_by = None
         if last_taken_out:
@@ -273,8 +274,8 @@ class TelegramBot(object):
         # What did she do last time she's been taken out?
         sql = """
             SELECT result, created_on FROM logs 
-            WHERE created_on > date('now') AND state = ? ORDER BY id DESC LIMIT 1"""
-        self.cursor.execute(sql, (STATE.COMPLETED,))
+            WHERE created_on > ? AND state = ? ORDER BY id DESC LIMIT 1"""
+        self.cursor.execute(sql, (today, STATE.COMPLETED,))
         last_taken_out = self.cursor.fetchone()
         if last_taken_out:
             text += emojize('\n\n*What did she do the last time she was taken out?*\n', use_aliases=True)
@@ -291,8 +292,8 @@ class TelegramBot(object):
         if last_taken_out_by:
             sql = """
                 SELECT handled_by FROM logs 
-                WHERE created_on > date('now') AND state = ? AND handled_by != ? ORDER BY id DESC LIMIT 1"""
-            self.cursor.execute(sql, (STATE.COMPLETED, last_taken_out_by))
+                WHERE created_on > ? AND state = ? AND handled_by != ? ORDER BY id DESC LIMIT 1"""
+            self.cursor.execute(sql, (today, STATE.COMPLETED, last_taken_out_by))
             next_to_take = self.cursor.fetchone()
             if next_to_take:
                 text += emojize('\n\n*Who takes her out next?*\n', use_aliases=True)
@@ -301,20 +302,20 @@ class TelegramBot(object):
         # Breakdown - What did she do?
         sql = """
             SELECT result, COUNT(event) FROM logs 
-            WHERE created_on > date('now') AND state = ? GROUP BY result"""
-        self.cursor.execute(sql, (STATE.COMPLETED,))
+            WHERE created_on > ? AND state = ? GROUP BY result"""
+        self.cursor.execute(sql, (today, STATE.COMPLETED,))
         rows = self.cursor.fetchall()
         if rows:
             text += emojize('\n\n*What did she do so far?*\n', use_aliases=True)
             for row in rows:
                 if row[0] == RESULT.NUMBER_1:
-                    text += '   *\#1*: {} time(s)'.format(row[1])
+                    text += '   *\#1*: {} time\(s\)'.format(row[1])
                 elif row[0] == RESULT.NUMBER_2:
-                    text += '   *\#2*: {} time(s)'.format(row[1])
+                    text += '   *\#2*: {} time\(s\)'.format(row[1])
                 elif row[0] == RESULT.BOTH:
-                    text += '   *Both*: {} time(s)'.format(row[1])
+                    text += '   *Both*: {} time\(s\)'.format(row[1])
                 elif row[0] == RESULT.NOTHING:
-                    text += '   *Nothing*: {} time(s)'.format(row[1])
+                    text += '   *Nothing*: {} time\(s\)'.format(row[1])
                 text += '\n'
 
         if not text:

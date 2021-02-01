@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS logs (
     handled_by text,
     state text NOT NULL,
     result text,
-    created_on time(s)tamp NOT NULL
+    created_on timestamp NOT NULL
 )
 """
 
